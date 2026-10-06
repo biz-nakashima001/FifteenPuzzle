@@ -79,7 +79,7 @@ struct ContentView: View {
             let stamp = Date()
             rowFlashes[row] = stamp
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(850))
+                try? await Task.sleep(for: .milliseconds(1100))
                 if rowFlashes[row] == stamp { rowFlashes[row] = nil }
             }
         }
@@ -172,30 +172,66 @@ private struct RowLightning: View {
     let started: Date
     let reduceMotion: Bool
 
+    // Stable within each 65 ms frame, so the bolt crackles without random redraw noise.
+    private func noise(_ seed: Int) -> CGFloat {
+        let value = sin(Double(seed) * 12.9898 + 78.233) * 43758.5453
+        return CGFloat(value - floor(value))
+    }
+    private func path(_ points: [CGPoint]) -> Path {
+        var result = Path()
+        if let first = points.first { result.move(to: first) }
+        for point in points.dropFirst() { result.addLine(to: point) }
+        return result
+    }
     var body: some View {
         TimelineView(.animation) { timeline in
-            let progress = min(1, max(0, timeline.date.timeIntervalSince(started) / 0.85))
+            let elapsed = max(0, timeline.date.timeIntervalSince(started))
+            let progress = min(1, elapsed / 1.1)
             Canvas { context, size in
-                let fade = sin(.pi * progress)
                 let frame = CGRect(origin: .zero, size: size)
-                context.fill(Path(roundedRect: frame, cornerRadius: 14), with: .color(.cyan.opacity(fade * 0.12)))
-                if !reduceMotion {
-                    var bolt = Path()
-                    let head = size.width * min(1, progress * 2.5)
-                    let tail = max(0, head - size.width * 0.55)
-                    bolt.move(to: CGPoint(x: tail, y: size.height * 0.5))
-                    for step in 1...24 {
-                        let x = tail + (head - tail) * CGFloat(step) / 24
-                        let zigzag: CGFloat = step % 2 == 0 ? -1 : 1
-                        bolt.addLine(to: CGPoint(x: x, y: size.height * 0.5 + zigzag * size.height * 0.14))
+                if reduceMotion {
+                    let fade = sin(.pi * progress)
+                    context.fill(Path(roundedRect: frame, cornerRadius: 14), with: .color(.cyan.opacity(fade * 0.18)))
+                } else {
+                    let fade = min(1, elapsed / 0.07) * max(0, 1 - (elapsed - 0.35) / 0.75)
+                    let flicker = 0.7 + 0.3 * pow(sin(elapsed * 77), 2)
+                    context.opacity = fade * flicker
+                    let tick = Int(elapsed / 0.065) * 97
+                    let amplitude = min(23, size.height * 0.23)
+                    let center = size.height / 2
+                    let points = (0...30).map { step in
+                        CGPoint(x: size.width * CGFloat(step) / 30,
+                                y: center + (step == 0 || step == 30 ? 0 : (noise(tick + step) * 2 - 1) * amplitude))
                     }
+                    let bolt = path(points)
+                    var branches = Path()
+                    for step in stride(from: 4, through: 27, by: 3) {
+                        let origin = points[step]
+                        let sign: CGFloat = step % 2 == 0 ? -1 : 1
+                        branches.addPath(path([
+                            origin,
+                            CGPoint(x: origin.x + 8 + noise(tick + step + 31) * 14, y: origin.y + sign * amplitude * 0.7),
+                            CGPoint(x: origin.x + 22 + noise(tick + step + 42) * 16, y: origin.y + sign * amplitude * 1.4),
+                            CGPoint(x: origin.x + 33 + noise(tick + step + 53) * 19, y: origin.y + sign * amplitude * 1.8)
+                        ]))
+                    }
+                    context.clip(to: Path(CGRect(x: -20, y: -30, width: (size.width + 40) * min(1, elapsed / 0.16), height: size.height + 60)))
+                    let style = StrokeStyle(lineWidth: 14, lineCap: .round, lineJoin: .round)
                     var glow = context
-                    glow.addFilter(.blur(radius: 8))
-                    glow.stroke(bolt, with: .color(.cyan.opacity(fade)), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
-                    context.stroke(bolt, with: .color(.cyan.opacity(fade)), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
-                    context.stroke(bolt, with: .color(.white.opacity(fade)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    glow.addFilter(.blur(radius: 14))
+                    glow.stroke(bolt, with: .color(.blue), style: style)
+                    glow.stroke(branches, with: .color(.cyan), style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+                    context.stroke(bolt, with: .color(.cyan), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    context.stroke(branches, with: .color(.cyan), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                    context.stroke(bolt, with: .color(.white), style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                    context.stroke(branches, with: .color(.white), lineWidth: 1)
+                    for step in stride(from: 2, through: 24, by: 2) {
+                        let point = points[step]
+                        let spark = CGRect(x: point.x + noise(tick + step + 64) * 20 - 10,
+                                           y: point.y + noise(tick + step + 75) * 64 - 32, width: 2, height: 2)
+                        context.fill(Path(ellipseIn: spark), with: .color(.white))
+                    }
                 }
-                context.stroke(Path(roundedRect: frame.insetBy(dx: 1, dy: 1), cornerRadius: 14), with: .color(.cyan.opacity(fade * 0.8)), lineWidth: 2)
             }
         }
     }
