@@ -3,6 +3,14 @@ import SwiftUI
 struct PuzzleBoard: Equatable {
     var tiles = Array(1...15) + [0]
     var solved: Bool { tiles == Array(1...15) + [0] }
+    var completedRows: Set<Int> {
+        Set((0..<4).filter { row in
+            (0..<4).allSatisfy { column in
+                let index = row * 4 + column
+                return tiles[index] == (index + 1) % 16
+            }
+        })
+    }
     static func isSolvable(_ tiles: [Int]) -> Bool {
         guard tiles.count == 16, Set(tiles) == Set(0...15), let blank = tiles.firstIndex(of: 0) else { return false }
         let numbers = tiles.filter { $0 != 0 }
@@ -32,6 +40,8 @@ struct ContentView: View {
     @State private var history: [[Int]] = []
     @State private var askNew = false
     @State private var initialized = false
+    @State private var rowFlashes: [Int: Date] = [:]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("bestMoves") private var bestMoves = 0
     private let accent = Color(red: 0.12, green: 0.62, blue: 0.55)
 
@@ -41,11 +51,14 @@ struct ContentView: View {
         started = nil
         finishedSeconds = nil
         history = []
+        rowFlashes = [:]
     }
     func move(_ index: Int) {
         guard finishedSeconds == nil else { return }
         let previous = board.tiles
+        let previousRows = board.completedRows
         guard board.move(at: index) else { return }
+        celebrateRows(after: previousRows)
         if started == nil { started = Date() }
         history.append(previous)
         moves += 1
@@ -56,8 +69,20 @@ struct ContentView: View {
     }
     func undo() {
         guard finishedSeconds == nil, let previous = history.popLast() else { return }
+        let previousRows = board.completedRows
         board.tiles = previous
+        celebrateRows(after: previousRows)
         moves = max(0, moves - 1)
+    }
+    func celebrateRows(after previousRows: Set<Int>) {
+        for row in board.completedRows.subtracting(previousRows) {
+            let stamp = Date()
+            rowFlashes[row] = stamp
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(850))
+                if rowFlashes[row] == stamp { rowFlashes[row] = nil }
+            }
+        }
     }
     func clock(_ date: Date) -> String {
         let seconds = finishedSeconds ?? started.map { max(0, Int(date.timeIntervalSince($0))) } ?? 0
@@ -99,6 +124,18 @@ struct ContentView: View {
                     }
                 }
             }.padding(12).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 22))
+                .overlay {
+                    GeometryReader { geometry in
+                        let tileHeight = (geometry.size.height - 24 - 30) / 4
+                        ForEach(rowFlashes.keys.sorted(), id: \.self) { row in
+                            if let started = rowFlashes[row] {
+                                RowLightning(started: started, reduceMotion: reduceMotion)
+                                    .frame(width: geometry.size.width - 24, height: tileHeight)
+                                    .offset(x: 12, y: 12 + CGFloat(row) * (tileHeight + 10))
+                            }
+                        }
+                    }.allowsHitTesting(false).accessibilityHidden(true)
+                }
             VStack(spacing: 7) {
                 if finishedSeconds != nil {
                     Label("完成！ おめでとうございます。", systemImage: "checkmark.seal.fill").font(.headline).foregroundStyle(accent)
@@ -128,5 +165,38 @@ struct ContentView: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(value).font(.system(size: 23, weight: .semibold, design: .rounded)).monospacedDigit()
         }.frame(maxWidth: .infinity)
+    }
+}
+
+private struct RowLightning: View {
+    let started: Date
+    let reduceMotion: Bool
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let progress = min(1, max(0, timeline.date.timeIntervalSince(started) / 0.85))
+            Canvas { context, size in
+                let fade = sin(.pi * progress)
+                let frame = CGRect(origin: .zero, size: size)
+                context.fill(Path(roundedRect: frame, cornerRadius: 14), with: .color(.cyan.opacity(fade * 0.12)))
+                if !reduceMotion {
+                    var bolt = Path()
+                    let head = size.width * min(1, progress * 2.5)
+                    let tail = max(0, head - size.width * 0.55)
+                    bolt.move(to: CGPoint(x: tail, y: size.height * 0.5))
+                    for step in 1...24 {
+                        let x = tail + (head - tail) * CGFloat(step) / 24
+                        let zigzag: CGFloat = step % 2 == 0 ? -1 : 1
+                        bolt.addLine(to: CGPoint(x: x, y: size.height * 0.5 + zigzag * size.height * 0.14))
+                    }
+                    var glow = context
+                    glow.addFilter(.blur(radius: 8))
+                    glow.stroke(bolt, with: .color(.cyan.opacity(fade)), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+                    context.stroke(bolt, with: .color(.cyan.opacity(fade)), style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    context.stroke(bolt, with: .color(.white.opacity(fade)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+                context.stroke(Path(roundedRect: frame.insetBy(dx: 1, dy: 1), cornerRadius: 14), with: .color(.cyan.opacity(fade * 0.8)), lineWidth: 2)
+            }
+        }
     }
 }

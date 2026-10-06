@@ -3,6 +3,19 @@ import Testing
 
 @MainActor
 struct FifteenPuzzleTests {
+    @Test func rowsCelebrateOnlyWhenNewlyCompleted() {
+        var board = PuzzleBoard()
+        #expect(board.completedRows == Set(0..<4))
+        _ = board.move(at: 11)
+        let incomplete = board.completedRows
+        #expect(incomplete == [0, 1])
+        _ = board.move(at: 15)
+        #expect(board.completedRows.subtracting(incomplete) == [2, 3])
+        let complete = board.completedRows
+        #expect(board.completedRows.subtracting(complete).isEmpty)
+        board.tiles = [2, 3, 4, 1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]
+        #expect(!board.completedRows.contains(0))
+    }
     @Test func shuffleProducesSolvableBoards() {
         var board = PuzzleBoard()
         for _ in 0..<1000 {
