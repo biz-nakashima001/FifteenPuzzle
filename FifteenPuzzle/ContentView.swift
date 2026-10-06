@@ -55,6 +55,9 @@ struct ContentView: View {
     @AppStorage("bestMoves") private var bestMoves = 0
     @AppStorage("reverseMode") private var reverseMode = false
     private let accent = Color(red: 0.12, green: 0.62, blue: 0.55)
+    private var modeAccent: Color {
+        reverseMode ? Color(red: 0.56, green: 0.34, blue: 0.82) : accent
+    }
 
     func newGame() {
         board.shuffle(reverse: reverseMode)
@@ -115,11 +118,11 @@ struct ContentView: View {
         VStack(spacing: 24) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("15 PUZZLE").font(.system(size: 12, weight: .bold, design: .rounded)).tracking(3).foregroundStyle(accent)
+                    Text("15 PUZZLE").font(.system(size: 12, weight: .bold, design: .rounded)).tracking(3).foregroundStyle(modeAccent)
                     Text("ひとマスずつ、整える。").font(.system(size: 25, weight: .semibold))
                 }
                 Spacer()
-                Image(systemName: "square.grid.3x3.fill").font(.system(size: 28)).foregroundStyle(accent)
+                Image(systemName: "square.grid.3x3.fill").font(.system(size: 28)).foregroundStyle(modeAccent)
             }
             HStack(spacing: 0) {
                 metric("手数", value: "\(moves)")
@@ -129,11 +132,25 @@ struct ContentView: View {
                 metric("最少手数", value: bestMoves == 0 ? "-" : "\(bestMoves)")
             }.padding(.vertical, 14).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
             Button(action: requestModeChange) {
-                Label(reverseMode ? "通常順モードへ（1 → 15）" : "逆順モードへ（15 → 1）",
-                      systemImage: reverseMode ? "arrow.uturn.backward.circle" : "arrow.uturn.forward.circle")
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 10) {
+                    Label(reverseMode ? "逆順モード" : "正順モード",
+                          systemImage: reverseMode ? "arrow.down.right.circle.fill" : "arrow.up.right.circle.fill")
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Text(reverseMode ? "15 → 1" : "1 → 15")
+                        .font(.system(.body, design: .rounded).weight(.medium))
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(modeAccent)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(modeAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(modeAccent.opacity(0.3)))
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .accessibilityLabel("現在は\(reverseMode ? "逆順" : "正順")モード。タップで\(reverseMode ? "正順" : "逆順")モードに切り替え")
             .accessibilityHint("切り替えると新しい盤面が始まります")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                 ForEach(0..<16, id: \.self) { index in
@@ -148,9 +165,9 @@ struct ContentView: View {
                             Text("\(value)").font(.system(size: 34, weight: .semibold, design: .rounded))
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .aspectRatio(1, contentMode: .fit)
-                                .background(isInPlace ? accent.opacity(0.18) : Color.primary.opacity(0.065), in: RoundedRectangle(cornerRadius: 14))
-                                .foregroundStyle(isInPlace ? accent : .primary)
-                                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.05)))
+                                .background(isInPlace ? modeAccent.opacity(0.2) : Color.primary.opacity(0.065), in: RoundedRectangle(cornerRadius: 14))
+                                .foregroundStyle(isInPlace ? modeAccent : .primary)
+                                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isInPlace ? modeAccent.opacity(0.58) : .primary.opacity(0.05), lineWidth: isInPlace ? 2 : 1))
                         }.buttonStyle(.plain).accessibilityLabel("タイル \(value)")
                     }
                 }
@@ -169,7 +186,7 @@ struct ContentView: View {
                 }
             VStack(spacing: 7) {
                 if finishedSeconds != nil {
-                    Label("完成！ おめでとうございます。", systemImage: "checkmark.seal.fill").font(.headline).foregroundStyle(accent)
+                    Label("完成！ おめでとうございます。", systemImage: "checkmark.seal.fill").font(.headline).foregroundStyle(modeAccent)
                 } else {
                     Text("空きマスの隣の数字をクリックして移動").font(.callout)
                 }
@@ -181,7 +198,7 @@ struct ContentView: View {
                 Spacer()
                 Button { if moves > 0 && finishedSeconds == nil { askNew = true } else { newGame() } } label: {
                     Label("新しいゲーム", systemImage: "shuffle")
-                }.buttonStyle(.borderedProminent).tint(accent).keyboardShortcut("n", modifiers: .command)
+                }.buttonStyle(.borderedProminent).tint(modeAccent).keyboardShortcut("n", modifiers: .command)
             }
         }.padding(30).frame(width: 500).frame(minWidth: 560, minHeight: 800)
         .background(Color(nsColor: .windowBackgroundColor))
