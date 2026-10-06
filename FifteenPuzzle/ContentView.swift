@@ -2,27 +2,36 @@ import SwiftUI
 
 struct PuzzleBoard: Equatable {
     var tiles = Array(1...15) + [0]
-    var solved: Bool { tiles == Array(1...15) + [0] }
-    var completedRows: Set<Int> {
-        Set((0..<4).filter { row in
+    static func goal(reverse: Bool) -> [Int] {
+        reverse ? [0] + Array((1...15).reversed()) : Array(1...15) + [0]
+    }
+    func solved(reverse: Bool = false) -> Bool { tiles == Self.goal(reverse: reverse) }
+    func completedRows(reverse: Bool = false) -> Set<Int> {
+        let target = Self.goal(reverse: reverse)
+        return Set((0..<4).filter { row in
             (0..<4).allSatisfy { column in
                 let index = row * 4 + column
-                return tiles[index] == (index + 1) % 16
+                return tiles[index] == target[index]
             }
         })
     }
-    static func isSolvable(_ tiles: [Int]) -> Bool {
+    static func isSolvable(_ tiles: [Int], reverse: Bool = false) -> Bool {
         guard tiles.count == 16, Set(tiles) == Set(0...15), let blank = tiles.firstIndex(of: 0) else { return false }
-        let numbers = tiles.filter { $0 != 0 }
+        let goal = Self.goal(reverse: reverse)
+        let rank = Dictionary(uniqueKeysWithValues: goal.enumerated().compactMap { index, tile in
+            tile == 0 ? nil : (tile, index)
+        })
+        let numbers = tiles.filter { $0 != 0 }.map { rank[$0]! }
         var inversions = 0
         for i in numbers.indices {
             for j in numbers.indices where j > i && numbers[i] > numbers[j] { inversions += 1 }
         }
         let rowFromBottom = 4 - blank / 4
-        return (inversions + rowFromBottom) % 2 == 1
+        let goalBlank = 4 - (goal.firstIndex(of: 0)! / 4)
+        return (inversions + rowFromBottom + goalBlank) % 2 == 0
     }
-    mutating func shuffle() {
-        repeat { tiles.shuffle() } while !Self.isSolvable(tiles) || solved
+    mutating func shuffle(reverse: Bool = false) {
+        repeat { tiles.shuffle() } while !Self.isSolvable(tiles, reverse: reverse) || solved(reverse: reverse)
     }
     mutating func move(at index: Int) -> Bool {
         guard tiles.indices.contains(index), let blank = tiles.firstIndex(of: 0), index != blank,
@@ -39,43 +48,57 @@ struct ContentView: View {
     @State private var finishedSeconds: Int?
     @State private var history: [[Int]] = []
     @State private var askNew = false
+    @State private var askModeChange = false
     @State private var initialized = false
     @State private var rowFlashes: [Int: Date] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("bestMoves") private var bestMoves = 0
+    @AppStorage("reverseMode") private var reverseMode = false
     private let accent = Color(red: 0.12, green: 0.62, blue: 0.55)
 
     func newGame() {
-        board.shuffle()
+        board.shuffle(reverse: reverseMode)
         moves = 0
         started = nil
         finishedSeconds = nil
         history = []
         rowFlashes = [:]
     }
+    func requestModeChange() {
+        if moves > 0 && finishedSeconds == nil {
+            askModeChange = true
+        } else {
+            reverseMode.toggle()
+            newGame()
+        }
+    }
+    func changeModeAndStartGame() {
+        reverseMode.toggle()
+        newGame()
+    }
     func move(_ index: Int) {
         guard finishedSeconds == nil else { return }
         let previous = board.tiles
-        let previousRows = board.completedRows
+        let previousRows = board.completedRows(reverse: reverseMode)
         guard board.move(at: index) else { return }
         celebrateRows(after: previousRows)
         if started == nil { started = Date() }
         history.append(previous)
         moves += 1
-        if board.solved {
+        if board.solved(reverse: reverseMode) {
             finishedSeconds = Int(Date().timeIntervalSince(started ?? Date()))
             if bestMoves == 0 || moves < bestMoves { bestMoves = moves }
         }
     }
     func undo() {
         guard finishedSeconds == nil, let previous = history.popLast() else { return }
-        let previousRows = board.completedRows
+        let previousRows = board.completedRows(reverse: reverseMode)
         board.tiles = previous
         celebrateRows(after: previousRows)
         moves = max(0, moves - 1)
     }
     func celebrateRows(after previousRows: Set<Int>) {
-        for row in board.completedRows.subtracting(previousRows) {
+        for row in board.completedRows(reverse: reverseMode).subtracting(previousRows) {
             let stamp = Date()
             rowFlashes[row] = stamp
             Task { @MainActor in
@@ -105,6 +128,13 @@ struct ContentView: View {
                 Divider().frame(height: 34)
                 metric("最少手数", value: bestMoves == 0 ? "-" : "\(bestMoves)")
             }.padding(.vertical, 14).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
+            Button(action: requestModeChange) {
+                Label(reverseMode ? "通常順モードへ（1 → 15）" : "逆順モードへ（15 → 1）",
+                      systemImage: reverseMode ? "arrow.uturn.backward.circle" : "arrow.uturn.forward.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint("切り替えると新しい盤面が始まります")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                 ForEach(0..<16, id: \.self) { index in
                     let value = board.tiles[index]
@@ -113,12 +143,13 @@ struct ContentView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.secondary.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4])))
                             .aspectRatio(1, contentMode: .fit).accessibilityLabel("空きマス")
                     } else {
+                        let isInPlace = board.tiles[index] == PuzzleBoard.goal(reverse: reverseMode)[index]
                         Button { withAnimation(.easeInOut(duration: 0.12)) { move(index) } } label: {
                             Text("\(value)").font(.system(size: 34, weight: .semibold, design: .rounded))
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .aspectRatio(1, contentMode: .fit)
-                                .background(value == index + 1 ? accent.opacity(0.18) : Color.primary.opacity(0.065), in: RoundedRectangle(cornerRadius: 14))
-                                .foregroundStyle(value == index + 1 ? accent : .primary)
+                                .background(isInPlace ? accent.opacity(0.18) : Color.primary.opacity(0.065), in: RoundedRectangle(cornerRadius: 14))
+                                .foregroundStyle(isInPlace ? accent : .primary)
                                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.05)))
                         }.buttonStyle(.plain).accessibilityLabel("タイル \(value)")
                     }
@@ -142,7 +173,7 @@ struct ContentView: View {
                 } else {
                     Text("空きマスの隣の数字をクリックして移動").font(.callout)
                 }
-                Text("1〜15を左上から順番に。右下を空きマスにします。 ").font(.caption).foregroundStyle(.secondary)
+                Text(reverseMode ? "15から1へ右下まで。左上を空きマスにします。" : "1〜15を左上から順番に。右下を空きマスにします。 ").font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
                 Button { undo() } label: { Label("ひとつ戻す", systemImage: "arrow.uturn.backward") }
@@ -159,6 +190,10 @@ struct ContentView: View {
             Button("キャンセル", role: .cancel) {}
             Button("始める") { newGame() }
         } message: { Text("現在の盤面と手数がリセットされます。") }
+        .alert("モードを切り替えますか？", isPresented: $askModeChange) {
+            Button("キャンセル", role: .cancel) {}
+            Button("切り替える") { changeModeAndStartGame() }
+        } message: { Text("モードを切り替えると、新しい盤面が始まります。") }
     }
     func metric(_ title: String, value: String) -> some View {
         VStack(spacing: 5) {
